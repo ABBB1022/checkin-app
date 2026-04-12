@@ -214,7 +214,7 @@ export default function App() {
       <nav className="bottom-nav glass">
         {[
           { id: 'home', icon: CheckSquare, label: '打卡' },
-          { id: 'manage', icon: ListBarChart, label: '事项' },
+          { id: 'manage', icon: BarChart3, label: '事项' },
           { id: 'stats', icon: BarChart3, label: '统计' }
         ].map(tab => (
           <motion.button
