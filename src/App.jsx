@@ -1,68 +1,94 @@
 import React, { useState, useEffect } from 'react'
-import { supabase } from './supabase'
-import Auth from './components/Auth'
 import Dashboard from './components/Dashboard'
 import Stats from './components/Stats'
 import ItemManager from './components/ItemManager'
+import { supabase } from './supabase'
 import './App.css'
 
 export default function App() {
-  const [user, setUser] = useState(null)
-  const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('home')
   const [items, setItems] = useState([])
   const [records, setRecords] = useState({})
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // 检查当前用户
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
-      setLoading(false)
-    })
-
-    // 监听认证状态变化
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-    })
-
-    return () => subscription.unsubscribe()
+    loadData()
   }, [])
 
-  // 加载用户的打卡事项
-  useEffect(() => {
-    if (user) {
-      loadItems()
-      loadRecords()
-    }
-  }, [user])
-
-  const loadItems = async () => {
-    const { data, error } = await supabase
+  const loadData = async () => {
+    setLoading(true)
+    
+    const { data: itemsData } = await supabase
       .from('items')
       .select('*')
       .order('sort_order', { ascending: true })
     
-    if (!error) setItems(data || [])
-  }
+    if (itemsData) setItems(itemsData)
 
-  const loadRecords = async () => {
-    const { data, error } = await supabase
+    const { data: recordsData } = await supabase
       .from('records')
       .select('*')
     
-    if (!error) {
+    if (recordsData) {
       const recordsMap = {}
-      data?.forEach(r => {
-        const key = `${r.date}_${r.item_id}`
-        recordsMap[key] = r
+      recordsData.forEach(r => {
+        recordsMap[`${r.date}_${r.item_id}`] = r
       })
       setRecords(recordsMap)
     }
+    
+    setLoading(false)
   }
 
-  const refreshData = () => {
-    loadItems()
-    loadRecords()
+  const addItem = async (text, icon) => {
+    const maxOrder = Math.max(...items.map(i => i.sort_order), -1)
+    const { data } = await supabase
+      .from('items')
+      .insert({ text, icon, sort_order: maxOrder + 1 })
+      .select()
+    
+    if (data) setItems([...items, ...data])
+  }
+
+  const updateItem = async (id, text, icon) => {
+    await supabase.from('items').update({ text, icon }).eq('id', id)
+    setItems(items.map(item => item.id === id ? { ...item, text, icon } : item))
+  }
+
+  const deleteItem = async (id) => {
+    await supabase.from('items').delete().eq('id', id)
+    loadData()
+  }
+
+  const reorderItems = async (draggedId, targetId) => {
+    const draggedItem = items.find(i => i.id === draggedId)
+    const targetItem = items.find(i => i.id === targetId)
+    if (!draggedItem || !targetItem) return
+
+    await supabase.from('items').update({ sort_order: targetItem.sort_order }).eq('id', draggedId)
+    await supabase.from('items').update({ sort_order: draggedItem.sort_order }).eq('id', targetId)
+    loadData()
+  }
+
+  const toggleRecord = async (date, itemId) => {
+    const key = `${date}_${itemId}`
+    
+    if (records[key]) {
+      await supabase.from('records').delete().eq('id', records[key].id)
+      loadData()
+      return false
+    } else {
+      await supabase.from('records').insert({ item_id: itemId, date, note: '' })
+      loadData()
+      return true
+    }
+  }
+
+  const updateNote = async (date, itemId, note) => {
+    const key = `${date}_${itemId}`
+    if (records[key]) {
+      await supabase.from('records').update({ note }).eq('id', records[key].id)
+    }
   }
 
   if (loading) {
@@ -74,66 +100,27 @@ export default function App() {
     )
   }
 
-  if (!user) {
-    return <Auth onAuth={() => {}} />
-  }
-
   return (
     <div className="app">
       <header className="header">
-        <h1>每日打卡</h1>
-        <button 
-          className="logout-btn"
-          onClick={() => supabase.auth.signOut()}
-        >
-          退出
-        </button>
+        <h1>🏃 每日打卡</h1>
       </header>
 
       <main className="main-content">
-        {activeTab === 'home' && (
-          <Dashboard 
-            items={items} 
-            records={records}
-            onRefresh={refreshData}
-            user={user}
-          />
-        )}
-        {activeTab === 'manage' && (
-          <ItemManager 
-            items={items} 
-            onRefresh={refreshData}
-          />
-        )}
-        {activeTab === 'stats' && (
-          <Stats 
-            items={items}
-            records={records}
-          />
-        )}
+        {activeTab === 'home' && <Dashboard items={items} records={records} onToggleRecord={toggleRecord} onUpdateNote={updateNote} />}
+        {activeTab === 'manage' && <ItemManager items={items} onAdd={addItem} onUpdate={updateItem} onDelete={deleteItem} onReorder={reorderItems} />}
+        {activeTab === 'stats' && <Stats items={items} records={records} />}
       </main>
 
       <nav className="bottom-nav">
-        <button 
-          className={`nav-item ${activeTab === 'home' ? 'active' : ''}`}
-          onClick={() => setActiveTab('home')}
-        >
-          <span className="nav-icon">✅</span>
-          <span className="nav-label">打卡</span>
+        <button className={`nav-item ${activeTab === 'home' ? 'active' : ''}`} onClick={() => setActiveTab('home')}>
+          <span className="nav-icon">✅</span><span className="nav-label">打卡</span>
         </button>
-        <button 
-          className={`nav-item ${activeTab === 'manage' ? 'active' : ''}`}
-          onClick={() => setActiveTab('manage')}
-        >
-          <span className="nav-icon">📋</span>
-          <span className="nav-label">事项</span>
+        <button className={`nav-item ${activeTab === 'manage' ? 'active' : ''}`} onClick={() => setActiveTab('manage')}>
+          <span className="nav-icon">📋</span><span className="nav-label">事项</span>
         </button>
-        <button 
-          className={`nav-item ${activeTab === 'stats' ? 'active' : ''}`}
-          onClick={() => setActiveTab('stats')}
-        >
-          <span className="nav-icon">📊</span>
-          <span className="nav-label">统计</span>
+        <button className={`nav-item ${activeTab === 'stats' ? 'active' : ''}`} onClick={() => setActiveTab('stats')}>
+          <span className="nav-icon">📊</span><span className="nav-label">统计</span>
         </button>
       </nav>
     </div>
