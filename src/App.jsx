@@ -4,7 +4,7 @@ import Stats from './components/Stats'
 import ItemManager from './components/ItemManager'
 import { supabase } from './supabase'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CheckSquare, ListBarChart, BarChart3 } from 'lucide-react'
+import { CheckSquare, BarChart3 } from 'lucide-react'
 import './App.css'
 
 export default function App() {
