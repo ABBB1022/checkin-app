@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect } from 'react'
 import Dashboard from './components/Dashboard'
 import Stats from './components/Stats'
 import ItemManager from './components/ItemManager'
-import { supabase } from './supabase'
+import { db, COLLECTIONS } from './cloudbase'
 import { motion, AnimatePresence } from 'framer-motion'
 import { CheckSquare, BarChart3 } from 'lucide-react'
 import './App.css'
@@ -12,7 +12,6 @@ export default function App() {
   const [items, setItems] = useState([])
   const [records, setRecords] = useState({})
   const [loading, setLoading] = useState(true)
-  const [pendingChanges, setPendingChanges] = useState({})
 
   useEffect(() => {
     loadData()
@@ -22,18 +21,17 @@ export default function App() {
   const loadData = async () => {
     setLoading(true)
     
-    const { data: itemsData } = await supabase
-      .from('items')
-      .select('*')
-      .order('sort_order', { ascending: true })
+    const itemsRes = await db.collection(COLLECTIONS.ITEMS)
+      .orderBy('sort_order', 'asc')
+      .get()
     
-    const { data: recordsData } = await supabase.from('records').select('*')
+    const recordsRes = await db.collection(COLLECTIONS.RECORDS).get()
     
-    if (itemsData) setItems(itemsData)
+    if (itemsRes.data) setItems(itemsRes.data)
     
-    if (recordsData) {
+    if (recordsRes.data) {
       const recordsMap = {}
-      recordsData.forEach(r => {
+      recordsRes.data.forEach(r => {
         recordsMap[`${r.date}_${r.item_id}`] = r
       })
       setRecords(recordsMap)
@@ -42,46 +40,37 @@ export default function App() {
     setLoading(false)
   }
 
-  // 乐观更新：添加事项
+  // 添加事项
   const addItem = async (text, icon) => {
-    const maxId = Math.max(...items.map(i => i.id), 0)
-    const maxOrder = Math.max(...items.map(i => i.sort_order), -1)
-    const tempItem = { id: maxId + 1, text, icon, sort_order: maxOrder + 1 }
+    const maxId = items.length > 0 ? Math.max(...items.map(i => i.id)) : 0
+    const maxOrder = items.length > 0 ? Math.max(...items.map(i => i.sort_order)) : -1
+    const newItem = { id: maxId + 1, text, icon, sort_order: maxOrder + 1 }
     
-    // 立即更新UI
-    setItems([...items, tempItem])
+    setItems([...items, newItem])
+    await db.collection(COLLECTIONS.ITEMS).add(newItem)
+  }
+
+  // 更新事项
+  const updateItem = async (id, text, icon) => {
+    setItems(items.map(item => item.id === id ? { ...item, text, icon } : item))
     
-    // 后台写入
-    const { data } = await supabase
-      .from('items')
-      .insert({ text, icon, sort_order: maxOrder + 1 })
-      .select()
-    
-    // 用真实数据替换临时数据
-    if (data) {
-      setItems(prev => prev.map(item => 
-        item.id === tempItem.id ? data[0] : item
-      ))
+    const item = items.find(i => i.id === id)
+    if (item && item._id) {
+      await db.collection(COLLECTIONS.ITEMS).doc(item._id).update({ text, icon })
     }
   }
 
-  // 乐观更新：更新事项
-  const updateItem = async (id, text, icon) => {
-    const oldItem = items.find(i => i.id === id)
-    setItems(items.map(item => item.id === id ? { ...item, text, icon } : item))
-    
-    await supabase.from('items').update({ text, icon }).eq('id', id)
-  }
-
-  // 乐观更新：删除事项
+  // 删除事项
   const deleteItem = async (id) => {
-    const oldItems = [...items]
     setItems(items.filter(item => item.id !== id))
     
-    await supabase.from('items').delete().eq('id', id)
+    const item = items.find(i => i.id === id)
+    if (item && item._id) {
+      await db.collection(COLLECTIONS.ITEMS).doc(item._id).remove()
+    }
   }
 
-  // 乐观更新：排序
+  // 排序
   const reorderItems = async (draggedId, targetId) => {
     const draggedItem = items.find(i => i.id === draggedId)
     const targetItem = items.find(i => i.id === targetId)
@@ -95,35 +84,35 @@ export default function App() {
     
     setItems(newItems)
     
-    await supabase.from('items').update({ sort_order: targetItem.sort_order }).eq('id', draggedId)
-    await supabase.from('items').update({ sort_order: draggedItem.sort_order }).eq('id', targetId)
+    if (draggedItem._id) {
+      await db.collection(COLLECTIONS.ITEMS).doc(draggedItem._id).update({ sort_order: targetItem.sort_order })
+    }
+    if (targetItem._id) {
+      await db.collection(COLLECTIONS.ITEMS).doc(targetItem._id).update({ sort_order: draggedItem.sort_order })
+    }
   }
 
-  // 乐观更新：打卡
+  // 打卡
   const toggleRecord = async (date, itemId) => {
     const key = `${date}_${itemId}`
     
     if (records[key]) {
-      // 取消打卡
       const oldRecord = records[key]
       const newRecords = { ...records }
       delete newRecords[key]
       setRecords(newRecords)
       
-      await supabase.from('records').delete().eq('id', oldRecord.id)
+      if (oldRecord._id) {
+        await db.collection(COLLECTIONS.RECORDS).doc(oldRecord._id).remove()
+      }
       return false
     } else {
-      // 打卡
-      const tempRecord = { item_id: itemId, date, note: '' }
-      setRecords({ ...records, [key]: tempRecord })
+      const newRecord = { item_id: itemId, date, note: '' }
+      setRecords({ ...records, [key]: newRecord })
       
-      const { data } = await supabase
-        .from('records')
-        .insert({ item_id: itemId, date, note: '' })
-        .select()
-      
-      if (data) {
-        setRecords(prev => ({ ...prev, [key]: data[0] }))
+      const res = await db.collection(COLLECTIONS.RECORDS).add(newRecord)
+      if (res.id) {
+        setRecords(prev => ({ ...prev, [key]: { ...newRecord, _id: res.id } }))
       }
       return true
     }
@@ -134,7 +123,10 @@ export default function App() {
     const key = `${date}_${itemId}`
     if (records[key]) {
       setRecords(prev => ({ ...prev, [key]: { ...prev[key], note } }))
-      await supabase.from('records').update({ note }).eq('id', records[key].id)
+      
+      if (records[key]._id) {
+        await db.collection(COLLECTIONS.RECORDS).doc(records[key]._id).update({ note })
+      }
     }
   }
 
@@ -159,12 +151,10 @@ export default function App() {
 
   return (
     <div className="app">
-      {/* 背景装饰 */}
       <div className="bg-gradient" />
       <div className="bg-glow bg-glow-1" />
       <div className="bg-glow bg-glow-2" />
       
-      {/* 头部 */}
       <motion.header 
         className="header glass"
         initial={{ y: -20, opacity: 0 }}
@@ -174,7 +164,6 @@ export default function App() {
         <div className="header-date">{new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</div>
       </motion.header>
 
-      {/* 主内容 */}
       <main className="main-content">
         <AnimatePresence mode="wait">
           {activeTab === 'home' && (
@@ -210,7 +199,6 @@ export default function App() {
         </AnimatePresence>
       </main>
 
-      {/* 底部导航 */}
       <nav className="bottom-nav glass">
         {[
           { id: 'home', icon: CheckSquare, label: '打卡' },
