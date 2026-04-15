@@ -13,10 +13,20 @@ export default function App() {
   const [records, setRecords] = useState({})
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    loadData()
-  }, [])
-
+// 在 useEffect 里先登录再加载数据
+useEffect(() => {
+  const init = async () => {
+    try {
+      await signInAnonymously()
+      await loadData()
+    } catch (error) {
+      console.error('初始化失败:', error)
+      setLoading(false)
+    }
+  }
+  init()
+}, [])
+  
   // 加载数据
   const loadData = async () => {
     setLoading(true)
