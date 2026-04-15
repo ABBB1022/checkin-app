@@ -16,17 +16,17 @@ export default function App() {
 
 // 在 useEffect 里先登录再加载数据
 useEffect(() => {
-  const init = async () => {
-    try {
-      await signInAnonymously()
-      await loadData()
-    } catch (error) {
-      console.error('初始化失败:', error)
-      setLoading(false)
+    const init = async () => {
+      try {
+        await signInAnonymously()
+        await loadData()
+      } catch (error) {
+        console.error('初始化失败:', error)
+        setLoading(false)
+      }
     }
-  }
-  init()
-}, [])
+    init()
+  }, [])
   
   // 加载数据
   const loadData = async () => {
