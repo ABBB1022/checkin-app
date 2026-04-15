@@ -2,11 +2,10 @@ import React, { useState, useEffect } from 'react'
 import Dashboard from './components/Dashboard'
 import Stats from './components/Stats'
 import ItemManager from './components/ItemManager'
-import { db, COLLECTIONS } from './cloudbase'
+import { db, COLLECTIONS, signInAnonymously } from './cloudbase'
 import { motion, AnimatePresence } from 'framer-motion'
 import { CheckSquare, BarChart3 } from 'lucide-react'
 import './App.css'
-import { db, COLLECTIONS, signInAnonymously } from './cloudbase'
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('home')
